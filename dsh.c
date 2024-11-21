@@ -12,8 +12,18 @@ int main() {
     int status;
 
     while (1) {
-        printf("dsh> ");
-        fgets(command, sizeof(command), stdin);
+        printf("$ ");
+        if (fgets(command, sizeof(command), stdin) == NULL) {
+            if (feof(stdin)) {
+                // Exit shell when CTL+D is pressed
+                printf("\n");
+                break;
+            } else {
+            // Some other error occurred
+                perror("fgets");
+                break;
+            }
+        }
 
         // Split the command into a command and arguments
         char* token = strtok(command, " \n");
