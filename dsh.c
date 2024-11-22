@@ -43,8 +43,20 @@ int main() {
             exit(EXIT_FAILURE);
         }
 
+        int last_exit_status = 0; 
+
         // Parent process
-        wait(&status);
+        if (wait(&status) == -1) {
+            perror("wait");
+        };
+
+        if (WIFEXITED(status)) {
+            last_exit_status = WEXITSTATUS(status);
+        }
+
+        char exit_status_str[10];
+        snprintf(exit_status_str, sizeof(exit_status_str), "%d", last_exit_status);
+        setenv("?", exit_status_str, 1);
     }
 
     return 0;
