@@ -37,8 +37,9 @@ int main() {
 
         if (fork() == 0) {
             // Child process
-            execvp(args[0], args);
-            perror("execvp");
+            if (execvp(args[0], args) == -1) {
+                fprintf(stderr, "command not found: %s\n", args[0]);
+            }
             exit(EXIT_FAILURE);
         }
 
