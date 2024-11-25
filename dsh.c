@@ -47,6 +47,16 @@ void handle_exit_status(int status) {
     setenv("?", exit_status_str, 1);
 }
 
+void exit_command(char **args) {
+    if (args[1] != NULL) {
+        fprintf(stderr, "exit: too many arguments\n");
+        return;
+    }
+
+    printf("Goodbye!\n");
+    exit(EXIT_SUCCESS);
+}
+
 int main() {
     char command[1024];
     char* args[MAX_ARGS];
@@ -66,6 +76,9 @@ int main() {
         }
 
         parse_command(command, args, MAX_ARGS);
+        if (strcmp(args[0], "exit") == 0) {
+            exit_command(args);
+        }
         status = execute_command(args);
         handle_exit_status(status);
     }
