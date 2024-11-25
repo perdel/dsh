@@ -6,13 +6,13 @@
 
 #define MAX_ARGS 1024
 
-char* read_input(char* buffer, size_t size) {
+char *read_input(char *buffer, size_t size) {
     printf("$ ");
     return fgets(buffer, size, stdin);
 }
 
-char** parse_command(char* input, char** args, int max_args) {
-    char* token = strtok(input, " \n");
+char **parse_command(char *input, char **args, int max_args) {
+    char *token = strtok(input, " \n");
     int arg_count = 0;
     while (token != NULL && arg_count < max_args) {
         args[arg_count] = token;
@@ -23,7 +23,7 @@ char** parse_command(char* input, char** args, int max_args) {
     return args;
 }
 
-int execute_command(char** args) {
+int execute_command(char **args) {
     pid_t pid = fork();
     if (pid == 0) {
         // Child process
@@ -59,7 +59,7 @@ void exit_command(char **args) {
 
 int main() {
     char command[1024];
-    char* args[MAX_ARGS];
+    char *args[MAX_ARGS];
     int status;
 
     while (1) {
