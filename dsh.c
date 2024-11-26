@@ -57,6 +57,16 @@ void exit_command(char **args) {
     exit(EXIT_SUCCESS);
 }
 
+void change_directory(char **args) {
+    if (args[1] == NULL) {
+        chdir(getenv("HOME"));
+    } else {
+        if(chdir(args[1]) == -1) {
+            fprintf(stderr, "cd: %s: No such file or directory\n", args[1]);
+        };
+    }
+}
+
 int main() {
     char command[1024];
     char *args[MAX_ARGS];
@@ -79,8 +89,12 @@ int main() {
         if (strcmp(args[0], "exit") == 0) {
             exit_command(args);
         }
+        else if (strcmp(args[0], "cd") == 0) {
+            change_directory(args);
+        } else {
         status = execute_command(args);
         handle_exit_status(status);
+        }
     }
 
     return 0;
