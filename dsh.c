@@ -61,9 +61,15 @@ void change_directory(char **args) {
     if (args[1] == NULL) {
         chdir(getenv("HOME"));
     } else {
-        if(chdir(args[1]) == -1) {
-            fprintf(stderr, "cd: %s: No such file or directory\n", args[1]);
-        };
+        if (strcmp(args[1], "..") == 0) {
+            chdir("..");
+        } else if (strcmp(args[1], ".") == 0) {
+            return;
+        } else {
+            if(chdir(args[1]) == -1) {
+                fprintf(stderr, "cd: %s: No such file or directory\n", args[1]);
+            };
+        }
     }
 }
 
