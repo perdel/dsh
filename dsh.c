@@ -67,6 +67,10 @@ void change_directory(char **args) {
             return;
         } else if (strcmp(args[1], "~") == 0) {
             chdir(getenv("HOME"));
+        } else if (strcmp(args[1], "-") == 0) {
+           if (chdir(getenv("OLDPWD")) == -1) {
+                fprintf(stderr, "cd: OLDPWD not set\n"); 
+           }
         } else {
             if(chdir(args[1]) == -1) {
                 fprintf(stderr, "cd: %s: No such file or directory\n", args[1]);
