@@ -5,6 +5,7 @@
 #include <string.h>
 
 #define MAX_ARGS 1024
+#define MAX_PIPE_CMDS 100
 
 char *read_input(char *buffer, size_t size) {
     printf("$ ");
@@ -21,6 +22,18 @@ char **parse_command(char *input, char **args, int max_args) {
     }
     args[arg_count] = NULL;
     return args;
+}
+
+void parse_pipeline(char *input, char **commands, int *num_commands) {
+    *num_commands = 0;
+    char *command = strtok(input, "|");
+    while (command != NULL && *num_commands < MAX_PIPE_CMDS) {
+        // Remove leading whitespace from each command
+        while (*command == ' ') command++;
+        commands[(*num_commands)++] = command;
+        command = strtok(NULL, "|");
+    }
+    commands[*num_commands] = NULL;
 }
 
 int execute_command(char **args) {
