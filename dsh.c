@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <string.h>
+#include <errno.h>
 
 #define MAX_ARGS 1024
 #define MAX_PIPE_CMDS 100
@@ -34,6 +35,73 @@ void parse_pipeline(char *input, char **commands, int *num_commands) {
         command = strtok(NULL, "|");
     }
     commands[*num_commands] = NULL;
+}
+
+void execute_pipeline(char *input_line) {
+    char *commands[MAX_PIPE_CMDS];
+    int num_commands = 0;
+    parse_pipeline(input_line, commands, &num_commands);
+
+    int prev_fd = STDIN_FILENO;  // For the first command, input is STDIN
+
+    for (int i = 0; i < num_commands; i++) {
+        int pipefd[2] = {-1, -1};
+
+        // For every command except the last, create a new pipe.
+        if (i < num_commands - 1) {
+            if (pipe(pipefd) == -1) {
+                perror("pipe");
+                exit(EXIT_FAILURE);
+            }
+        }
+
+        pid_t pid = fork();
+        if (pid == -1) {
+            perror("fork");
+            exit(EXIT_FAILURE);
+        } else if (pid == 0) {  // Child process
+            // Redirect input if it's not the first command.
+            if (prev_fd != STDIN_FILENO) {
+                if (dup2(prev_fd, STDIN_FILENO) == -1) {
+                    perror("dup2");
+                    exit(EXIT_FAILURE);
+                }
+                close(prev_fd);
+            }
+            // Redirect output if it's not the last command.
+            if (i < num_commands - 1) {
+                if (dup2(pipefd[1], STDOUT_FILENO) == -1) {
+                    perror("dup2");
+                    exit(EXIT_FAILURE);
+                }
+                close(pipefd[0]);
+                close(pipefd[1]);
+            }
+
+            char *args[MAX_ARGS];
+            parse_command(commands[i], args, MAX_ARGS);
+
+            if (execvp(args[0], args) == -1) {
+                perror(args[0]);
+                exit(EXIT_FAILURE);
+            }
+        } else {  // Parent process
+            // Close previous input file descriptor if not STDIN.
+            if (prev_fd != STDIN_FILENO) {
+                close(prev_fd);
+            }
+            // Close the write end of the current pipe.
+            if (i < num_commands - 1) {
+                close(pipefd[1]);
+                prev_fd = pipefd[0];  // The read end becomes input for the next command.
+            }
+        }
+    }
+
+    // Wait for all child processes to finish.
+    for (int i = 0; i < num_commands; i++) {
+        wait(NULL);
+    }
 }
 
 int execute_command(char **args) {
