@@ -100,7 +100,9 @@ void execute_pipeline(char *input_line) {
 
     // Wait for all child processes to finish.
     for (int i = 0; i < num_commands; i++) {
-        wait(NULL);
+        if (wait(NULL) == -1) {
+            perror("wait");
+        }
     }
 }
 
