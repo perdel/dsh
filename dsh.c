@@ -9,7 +9,9 @@
 #define MAX_PIPE_CMDS 100
 
 char *read_input(char *buffer, size_t size) {
-    printf("$ ");
+    if (isatty(STDIN_FILENO)) {  // Check if input is from a terminal
+        printf("$ ");
+    }
     return fgets(buffer, size, stdin);
 }
 
