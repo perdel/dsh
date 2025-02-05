@@ -177,16 +177,21 @@ int main() {
                 break;
             }
         }
-
-        parse_command(command, args, MAX_ARGS);
-        if (strcmp(args[0], "exit") == 0) {
-            exit_command(args);
-        }
-        else if (strcmp(args[0], "cd") == 0) {
-            change_directory(args);
+        // If the command contains a pipe, use the pipeline execution.
+        if (strchr(command, '|') != NULL) {
+            execute_pipeline(command);
         } else {
-        status = execute_command(args);
-        handle_exit_status(status);
+            parse_command(command, args, MAX_ARGS);
+            if (args[0] == NULL) continue;  // Empty command
+
+            if (strcmp(args[0], "exit") == 0) {
+                exit_command(args);
+            } else if (strcmp(args[0], "cd") == 0) {
+                change_directory(args);
+            } else {
+                status = execute_command(args);
+                handle_exit_status(status);
+            }
         }
     }
 
