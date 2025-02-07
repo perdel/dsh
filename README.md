@@ -4,3 +4,4 @@ This project implements a simple Unix-like shell from scratch. Some features tha
 + command-line argument handling
 + error-handling for mistyped commands
 + saving the command exit status
++ pipelining
