@@ -4,6 +4,7 @@
 #include <sys/wait.h>
 #include <string.h>
 #include <errno.h>
+#include <fcntl.h>
 
 #define MAX_ARGS 1024
 #define MAX_PIPE_CMDS 100
@@ -15,13 +16,26 @@ char *read_input(char *buffer, size_t size) {
     return fgets(buffer, size, stdin);
 }
 
-char **parse_command(char *input, char **args, int max_args) {
+char **parse_command(char *input, char **args, int max_args, char **input_file, char **output_file, int *append_mode) {
     char *token = strtok(input, " \n");
     int arg_count = 0;
+    
     while (token != NULL && arg_count < max_args) {
-        args[arg_count] = token;
+        if (strcmp(token, "<") == 0) {
+            token = strtok(NULL, " \n");
+            if (token) *input_file = token;
+        } else if (strcmp(token, ">") == 0) {
+            token = strtok(NULL, " \n");
+            if (token) *output_file = token;
+            *append_mode = 0;
+        } else if (strcmp(token, ">>") == 0) {
+            token = strtok(NULL, " \n");
+            if (token) *output_file = token;
+            *append_mode = 1;
+        } else {
+            args[arg_count++] = token;
+        }
         token = strtok(NULL, " \n");
-        arg_count++;
     }
     args[arg_count] = NULL;
     return args;
@@ -44,7 +58,9 @@ void execute_pipeline(char *input_line) {
     int num_commands = 0;
     parse_pipeline(input_line, commands, &num_commands);
 
-    int prev_fd = STDIN_FILENO;  // For the first command, input is STDIN
+    int prev_fd = STDIN_FILENO;  // Input for first command
+    char *input_file = NULL, *output_file = NULL;
+    int append_mode = 0;
 
     for (int i = 0; i < num_commands; i++) {
         int pipefd[2] = {-1, -1};
@@ -62,16 +78,44 @@ void execute_pipeline(char *input_line) {
             perror("fork");
             exit(EXIT_FAILURE);
         } else if (pid == 0) {  // Child process
-            // Redirect input if it's not the first command.
-            if (prev_fd != STDIN_FILENO) {
+            char *args[MAX_ARGS];
+            input_file = output_file = NULL;
+            append_mode = 0;
+            parse_command(commands[i], args, MAX_ARGS, &input_file, &output_file, &append_mode);
+
+            // Handle input redirection
+            if (input_file) {
+                int fd = open(input_file, O_RDONLY);
+                if (fd == -1) {
+                    perror(input_file);
+                    exit(EXIT_FAILURE);
+                }
+                if (dup2(fd, STDIN_FILENO) == -1) {
+                    perror("dup2");
+                    exit(EXIT_FAILURE);
+                }
+                close(fd);
+            } else if (prev_fd != STDIN_FILENO) {  // Pipe input
                 if (dup2(prev_fd, STDIN_FILENO) == -1) {
                     perror("dup2");
                     exit(EXIT_FAILURE);
                 }
                 close(prev_fd);
             }
-            // Redirect output if it's not the last command.
-            if (i < num_commands - 1) {
+
+            // Handle output redirection
+            if (output_file) {
+                int fd = open(output_file, O_WRONLY | O_CREAT | (append_mode ? O_APPEND : O_TRUNC), 0644);
+                if (fd == -1) {
+                    perror(output_file);
+                    exit(EXIT_FAILURE);
+                }
+                if (dup2(fd, STDOUT_FILENO) == -1) {
+                    perror("dup2");
+                    exit(EXIT_FAILURE);
+                }
+                close(fd);
+            } else if (i < num_commands - 1) {  // Pipe output
                 if (dup2(pipefd[1], STDOUT_FILENO) == -1) {
                     perror("dup2");
                     exit(EXIT_FAILURE);
@@ -79,9 +123,6 @@ void execute_pipeline(char *input_line) {
                 close(pipefd[0]);
                 close(pipefd[1]);
             }
-
-            char *args[MAX_ARGS];
-            parse_command(commands[i], args, MAX_ARGS);
 
             if (execvp(args[0], args) == -1) {
                 perror(args[0]);
@@ -167,7 +208,9 @@ void change_directory(char **args) {
 int main() {
     char command[1024];
     char *args[MAX_ARGS];
+    char *input_file = NULL, *output_file= NULL;
     int status;
+    int append_mode = 0;
 
     while (1) {
         if (read_input(command, sizeof(command)) == NULL) {
@@ -185,7 +228,10 @@ int main() {
         if (strchr(command, '|') != NULL) {
             execute_pipeline(command);
         } else {
-            parse_command(command, args, MAX_ARGS);
+            input_file = output_file = NULL;
+            append_mode = 0;
+            parse_command(command, args, MAX_ARGS, &input_file, &output_file, &append_mode);
+
             if (args[0] == NULL) continue;  // Empty command
 
             if (strcmp(args[0], "exit") == 0) {
