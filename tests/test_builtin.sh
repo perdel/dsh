@@ -29,3 +29,18 @@ run_test "Empty Input" "\nexit\n" "Goodbye!"
 run_test "Built-in cd" "cd /tmp\npwd\nexit\n" "/tmp\nGoodbye!"
 
 run_test "Built-in exit" "exit\n" "Goodbye!"
+
+# Test redirection
+echo "This is test input." > test_input.txt
+
+run_test "Output Redirection (>)" "echo 'hello world' > output_redirect.txt\ncat output_redirect.txt\nexit\n" "hello world\nGoodbye!"
+rm -f output_redirect.txt
+
+run_test "Append Redirection (>>)" "echo 'line 1' > append_redirect.txt\necho 'line 2' >> append_redirect.txt\ncat append_redirect.txt\nexit\n" "line 1\nline 2\nGoodbye!"
+rm -f append_redirect.txt
+
+run_test "Input Redirection (<)" "cat < test_input.txt\nexit\n" "This is test input.\nGoodbye!"
+rm -f test_input.txt
+
+run_test "Combined Redirection (< and >)" "cat < test_input.txt > combined_redirect.txt\ncat combined_redirect.txt\nexit\n" "This is test input.\nGoodbye!"
+rm -f combined_redirect.txt

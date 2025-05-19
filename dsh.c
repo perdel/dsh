@@ -149,10 +149,43 @@ void execute_pipeline(char *input_line) {
     }
 }
 
-int execute_command(char **args) {
+int execute_command(char **args, char *input_file, char *output_file, int append_mode) {
     pid_t pid = fork();
-    if (pid == 0) {
+    if (pid == -1) {
+        perror("fork");
+        return -1; // Indicate error
+    } else if (pid == 0) {
         // Child process
+
+        // Handle input redirection
+        if (input_file) {
+            int fd = open(input_file, O_RDONLY);
+            if (fd == -1) {
+                perror(input_file);
+                exit(EXIT_FAILURE);
+            }
+            if (dup2(fd, STDIN_FILENO) == -1) {
+                perror("dup2");
+                exit(EXIT_FAILURE);
+            }
+            close(fd);
+        }
+
+        // Handle output redirection
+        if (output_file) {
+            int flags = O_WRONLY | O_CREAT | (append_mode ? O_APPEND : O_TRUNC);
+            int fd = open(output_file, flags, 0644);
+            if (fd == -1) {
+                perror(output_file);
+                exit(EXIT_FAILURE);
+            }
+            if (dup2(fd, STDOUT_FILENO) == -1) {
+                perror("dup2");
+                exit(EXIT_FAILURE);
+            }
+            close(fd);
+        }
+
         if (execvp(args[0], args) == -1) {
             fprintf(stderr, "command not found: %s\n", args[0]);
         }
@@ -162,6 +195,7 @@ int execute_command(char **args) {
         int status;
         if (wait(&status) == -1) {
             perror("wait");
+            return -1; // Indicate error
         }
         return WEXITSTATUS(status);
     }
@@ -239,8 +273,10 @@ int main() {
             } else if (strcmp(args[0], "cd") == 0) {
                 change_directory(args);
             } else {
-                status = execute_command(args);
-                handle_exit_status(status);
+                status = execute_command(args, input_file, output_file, append_mode);
+                if (status != -1) { // Only handle status if execution didn't fail before wait
+                    handle_exit_status(status);
+                }
             }
         }
     }
