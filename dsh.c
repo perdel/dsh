@@ -239,6 +239,14 @@ void change_directory(char **args) {
     }
 }
 
+void echo_command(char **args) {
+    // Start from the second argument (args[1])
+    for (int i = 1; args[i] != NULL; i++) {
+        printf("%s%s", args[i], args[i+1] != NULL ? " " : "");
+    }
+    printf("\n");
+}
+
 int main() {
     char command[1024];
     char *args[MAX_ARGS];
@@ -272,6 +280,10 @@ int main() {
                 exit_command(args);
             } else if (strcmp(args[0], "cd") == 0) {
                 change_directory(args);
+                handle_exit_status(0); // Set status to 0 for successful built-in
+            } else if (strcmp(args[0], "echo") == 0) {
+                echo_command(args);
+                handle_exit_status(0); // Set status to 0 for successful built-in
             } else {
                 status = execute_command(args, input_file, output_file, append_mode);
                 if (status != -1) { // Only handle status if execution didn't fail before wait
