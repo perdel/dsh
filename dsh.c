@@ -247,6 +247,15 @@ void echo_command(char **args) {
     printf("\n");
 }
 
+void pwd_command() {
+    char cwd[1024];
+    if (getcwd(cwd, sizeof(cwd)) != NULL) {
+        printf("%s\n", cwd);
+    } else {
+        perror("getcwd");
+    }
+}
+
 int main() {
     char command[1024];
     char *args[MAX_ARGS];
@@ -284,7 +293,11 @@ int main() {
             } else if (strcmp(args[0], "echo") == 0) {
                 echo_command(args);
                 handle_exit_status(0); // Set status to 0 for successful built-in
-            } else {
+            } else if (strcmp(args[0], "pwd") == 0) {
+                pwd_command();
+                handle_exit_status(0); // Set status to 0 for successful built-in
+            }
+            else {
                 status = execute_command(args, input_file, output_file, append_mode);
                 if (status != -1) { // Only handle status if execution didn't fail before wait
                     handle_exit_status(status);
