@@ -5,6 +5,7 @@
 #include <string.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <glob.h>
 
 #define MAX_ARGS 1024
 #define MAX_PIPE_CMDS 100
@@ -40,6 +41,106 @@ char **parse_command(char *input, char **args, int max_args, char **input_file, 
     args[arg_count] = NULL;
     return args;
 }
+
+// Function to expand wildcards in the argument list
+char **expand_wildcards(char **args) {
+    glob_t glob_results;
+    int i = 0;
+    int arg_count = 0;
+    char **new_args = NULL;
+    int current_new_args_size = MAX_ARGS; // Initial size, will realloc if needed
+
+    // Allocate initial memory for the new argument list
+    new_args = malloc(current_new_args_size * sizeof(char *));
+    if (new_args == NULL) {
+        perror("malloc");
+        return args; // Return original args on failure
+    }
+
+    while (args[i] != NULL) {
+        // Check if the argument contains wildcard characters
+        if (strchr(args[i], '*') != NULL || strchr(args[i], '?') != NULL || strchr(args[i], '[') != NULL) {
+            // Perform glob expansion
+            // Use GLOB_NOMATCH to keep the original pattern if no matches are found
+            int ret = glob(args[i], GLOB_NOMATCH | GLOB_TILDE, NULL, &glob_results);
+
+            if (ret == 0) { // Matches found
+                // Ensure enough space in new_args
+                if (arg_count + glob_results.gl_pathc >= current_new_args_size) {
+                    current_new_args_size += glob_results.gl_pathc + MAX_ARGS; // Increase size
+                    char **temp_args = realloc(new_args, current_new_args_size * sizeof(char *));
+                    if (temp_args == NULL) {
+                        perror("realloc");
+                        globfree(&glob_results);
+                        // Free partially built new_args if realloc fails
+                        // Note: This is tricky; for simplicity, we might just return original args
+                        // and leak the partial new_args here in a real shell you'd handle this better.
+                        free(new_args);
+                        return args;
+                    }
+                    new_args = temp_args;
+                }
+
+                // Copy expanded paths to new_args
+                for (size_t j = 0; j < glob_results.gl_pathc; j++) {
+                    new_args[arg_count++] = strdup(glob_results.gl_pathv[j]); // strdup to own the string
+                }
+                globfree(&glob_results); // Free glob's internal memory
+
+            } else if (ret == GLOB_NOMATCH) { // No matches, keep original argument
+                 if (arg_count + 1 >= current_new_args_size) {
+                    current_new_args_size += MAX_ARGS; // Increase size
+                    char **temp_args = realloc(new_args, current_new_args_size * sizeof(char *));
+                    if (temp_args == NULL) {
+                        perror("realloc");
+                        // Free partially built new_args
+                        free(new_args);
+                        return args;
+                    }
+                    new_args = temp_args;
+                }
+                new_args[arg_count++] = strdup(args[i]); // strdup to own the string
+            } else { // glob error
+                perror("glob");
+                 if (arg_count + 1 >= current_new_args_size) {
+                    current_new_args_size += MAX_ARGS; // Increase size
+                    char **temp_args = realloc(new_args, current_new_args_size * sizeof(char *));
+                    if (temp_args == NULL) {
+                        perror("realloc");
+                        // Free partially built new_args
+                        free(new_args);
+                        return args;
+                    }
+                    new_args = temp_args;
+                }
+                new_args[arg_count++] = strdup(args[i]); // strdup to own the string
+            }
+        } else { // No wildcards, keep original argument
+             if (arg_count + 1 >= current_new_args_size) {
+                current_new_args_size += MAX_ARGS; // Increase size
+                char **temp_args = realloc(new_args, current_new_args_size * sizeof(char *));
+                if (temp_args == NULL) {
+                    perror("realloc");
+                    // Free partially built new_args
+                    free(new_args);
+                    return args;
+                }
+                new_args = temp_args;
+            }
+            new_args[arg_count++] = strdup(args[i]); // strdup to own the string
+        }
+        i++;
+    }
+
+    new_args[arg_count] = NULL; // Null-terminate the new argument list
+
+    // Free the original arguments if they were dynamically allocated (not the case here, but good practice)
+    // For this shell, args is a fixed-size array, so no need to free args itself.
+    // However, the strings within args are from the input buffer, which is freed later.
+
+    return new_args;
+}
+
 
 void parse_pipeline(char *input, char **commands, int *num_commands) {
     *num_commands = 0;
@@ -83,50 +184,122 @@ void execute_pipeline(char *input_line) {
             append_mode = 0;
             parse_command(commands[i], args, MAX_ARGS, &input_file, &output_file, &append_mode);
 
-            // Handle input redirection
-            if (input_file) {
-                int fd = open(input_file, O_RDONLY);
-                if (fd == -1) {
-                    perror(input_file);
-                    exit(EXIT_FAILURE);
+            char **expanded_args = expand_wildcards(args);
+            if (expanded_args == args) { // Expansion failed or no wildcards, use original
+                // Handle input redirection
+                if (input_file) {
+                    int fd = open(input_file, O_RDONLY);
+                    if (fd == -1) {
+                        perror(input_file);
+                        exit(EXIT_FAILURE);
+                    }
+                    if (dup2(fd, STDIN_FILENO) == -1) {
+                        perror("dup2");
+                        exit(EXIT_FAILURE);
+                    }
+                    close(fd);
+                } else if (prev_fd != STDIN_FILENO) {  // Pipe input
+                    if (dup2(prev_fd, STDIN_FILENO) == -1) {
+                        perror("dup2");
+                        exit(EXIT_FAILURE);
+                    }
+                    close(prev_fd);
                 }
-                if (dup2(fd, STDIN_FILENO) == -1) {
-                    perror("dup2");
-                    exit(EXIT_FAILURE);
-                }
-                close(fd);
-            } else if (prev_fd != STDIN_FILENO) {  // Pipe input
-                if (dup2(prev_fd, STDIN_FILENO) == -1) {
-                    perror("dup2");
-                    exit(EXIT_FAILURE);
-                }
-                close(prev_fd);
-            }
 
-            // Handle output redirection
-            if (output_file) {
-                int fd = open(output_file, O_WRONLY | O_CREAT | (append_mode ? O_APPEND : O_TRUNC), 0644);
-                if (fd == -1) {
-                    perror(output_file);
-                    exit(EXIT_FAILURE);
+                // Handle output redirection
+                if (output_file) {
+                    int fd = open(output_file, O_WRONLY | O_CREAT | (append_mode ? O_APPEND : O_TRUNC), 0644);
+                    if (fd == -1) {
+                        perror(output_file);
+                        exit(EXIT_FAILURE);
+                    }
+                    if (dup2(fd, STDOUT_FILENO) == -1) {
+                        perror("dup2");
+                        exit(EXIT_FAILURE);
+                    }
+                    close(fd);
+                } else if (i < num_commands - 1) {  // Pipe output
+                    if (dup2(pipefd[1], STDOUT_FILENO) == -1) {
+                        perror("dup2");
+                        exit(EXIT_FAILURE);
+                    }
+                    close(pipefd[0]);
+                    close(pipefd[1]);
                 }
-                if (dup2(fd, STDOUT_FILENO) == -1) {
-                    perror("dup2");
-                    exit(EXIT_FAILURE);
-                }
-                close(fd);
-            } else if (i < num_commands - 1) {  // Pipe output
-                if (dup2(pipefd[1], STDOUT_FILENO) == -1) {
-                    perror("dup2");
-                    exit(EXIT_FAILURE);
-                }
-                close(pipefd[0]);
-                close(pipefd[1]);
-            }
 
-            if (execvp(args[0], args) == -1) {
-                perror(args[0]);
-                exit(EXIT_FAILURE);
+                if (execvp(args[0], args) == -1) {
+                    perror(args[0]);
+                    exit(EXIT_FAILURE);
+                }
+            } else { // Expansion successful, use expanded_args
+                 // Handle input redirection
+                if (input_file) {
+                    int fd = open(input_file, O_RDONLY);
+                    if (fd == -1) {
+                        perror(input_file);
+                        // Free expanded_args before exiting
+                        for(int j=0; expanded_args[j] != NULL; j++) free(expanded_args[j]);
+                        free(expanded_args);
+                        exit(EXIT_FAILURE);
+                    }
+                    if (dup2(fd, STDIN_FILENO) == -1) {
+                        perror("dup2");
+                        // Free expanded_args before exiting
+                        for(int j=0; expanded_args[j] != NULL; j++) free(expanded_args[j]);
+                        free(expanded_args);
+                        exit(EXIT_FAILURE);
+                    }
+                    close(fd);
+                } else if (prev_fd != STDIN_FILENO) {  // Pipe input
+                    if (dup2(prev_fd, STDIN_FILENO) == -1) {
+                        perror("dup2");
+                        // Free expanded_args before exiting
+                        for(int j=0; expanded_args[j] != NULL; j++) free(expanded_args[j]);
+                        free(expanded_args);
+                        exit(EXIT_FAILURE);
+                    }
+                    close(prev_fd);
+                }
+
+                // Handle output redirection
+                if (output_file) {
+                    int fd = open(output_file, O_WRONLY | O_CREAT | (append_mode ? O_APPEND : O_TRUNC), 0644);
+                    if (fd == -1) {
+                        perror(output_file);
+                        // Free expanded_args before exiting
+                        for(int j=0; expanded_args[j] != NULL; j++) free(expanded_args[j]);
+                        free(expanded_args);
+                        exit(EXIT_FAILURE);
+                    }
+                    if (dup2(fd, STDOUT_FILENO) == -1) {
+                        perror("dup2");
+                        // Free expanded_args before exiting
+                        for(int j=0; expanded_args[j] != NULL; j++) free(expanded_args[j]);
+                        free(expanded_args);
+                        exit(EXIT_FAILURE);
+                    }
+                    close(fd);
+                } else if (i < num_commands - 1) {  // Pipe output
+                    if (dup2(pipefd[1], STDOUT_FILENO) == -1) {
+                        perror("dup2");
+                        // Free expanded_args before exiting
+                        for(int j=0; expanded_args[j] != NULL; j++) free(expanded_args[j]);
+                        free(expanded_args);
+                        exit(EXIT_FAILURE);
+                    }
+                    close(pipefd[0]);
+                    close(pipefd[1]);
+                }
+
+                if (execvp(expanded_args[0], expanded_args) == -1) {
+                    perror(expanded_args[0]);
+                }
+
+                // Free the expanded arguments before exiting the child process
+                for(int j=0; expanded_args[j] != NULL; j++) free(expanded_args[j]);
+                free(expanded_args);
+
+                exit(EXIT_FAILURE); // Exit child process
             }
         } else {  // Parent process
             // Close previous input file descriptor if not STDIN.
@@ -156,40 +329,93 @@ int execute_command(char **args, char *input_file, char *output_file, int append
         return -1; // Indicate error
     } else if (pid == 0) {
         // Child process
+        char **expanded_args = expand_wildcards(args);
+        if (expanded_args == args) { // Expansion failed or no wildcards, use original
+             // Handle input redirection
+            if (input_file) {
+                int fd = open(input_file, O_RDONLY);
+                if (fd == -1) {
+                    perror(input_file);
+                    exit(EXIT_FAILURE);
+                }
+                if (dup2(fd, STDIN_FILENO) == -1) {
+                    perror("dup2");
+                    exit(EXIT_FAILURE);
+                }
+                close(fd);
+            }
 
-        // Handle input redirection
-        if (input_file) {
-            int fd = open(input_file, O_RDONLY);
-            if (fd == -1) {
-                perror(input_file);
-                exit(EXIT_FAILURE);
+            // Handle output redirection
+            if (output_file) {
+                int flags = O_WRONLY | O_CREAT | (append_mode ? O_APPEND : O_TRUNC);
+                int fd = open(output_file, flags, 0644);
+                if (fd == -1) {
+                    perror(output_file);
+                    exit(EXIT_FAILURE);
+                }
+                if (dup2(fd, STDOUT_FILENO) == -1) {
+                    perror("dup2");
+                    exit(EXIT_FAILURE);
+                }
+                close(fd);
             }
-            if (dup2(fd, STDIN_FILENO) == -1) {
-                perror("dup2");
-                exit(EXIT_FAILURE);
-            }
-            close(fd);
-        }
 
-        // Handle output redirection
-        if (output_file) {
-            int flags = O_WRONLY | O_CREAT | (append_mode ? O_APPEND : O_TRUNC);
-            int fd = open(output_file, flags, 0644);
-            if (fd == -1) {
-                perror(output_file);
-                exit(EXIT_FAILURE);
+            if (execvp(args[0], args) == -1) {
+                fprintf(stderr, "command not found: %s\n", args[0]);
             }
-            if (dup2(fd, STDOUT_FILENO) == -1) {
-                perror("dup2");
-                exit(EXIT_FAILURE);
+            exit(EXIT_FAILURE); // Exit child process
+        } else { // Expansion successful, use expanded_args
+            // Handle input redirection
+            if (input_file) {
+                int fd = open(input_file, O_RDONLY);
+                if (fd == -1) {
+                    perror(input_file);
+                    // Free expanded_args before exiting
+                    for(int i=0; expanded_args[i] != NULL; i++) free(expanded_args[i]);
+                    free(expanded_args);
+                    exit(EXIT_FAILURE);
+                }
+                if (dup2(fd, STDIN_FILENO) == -1) {
+                    perror("dup2");
+                     // Free expanded_args before exiting
+                    for(int i=0; expanded_args[i] != NULL; i++) free(expanded_args[i]);
+                    free(expanded_args);
+                    exit(EXIT_FAILURE);
+                }
+                close(fd);
             }
-            close(fd);
-        }
 
-        if (execvp(args[0], args) == -1) {
-            fprintf(stderr, "command not found: %s\n", args[0]);
+            // Handle output redirection
+            if (output_file) {
+                int flags = O_WRONLY | O_CREAT | (append_mode ? O_APPEND : O_TRUNC);
+                int fd = open(output_file, flags, 0644);
+                if (fd == -1) {
+                    perror(output_file);
+                     // Free expanded_args before exiting
+                    for(int i=0; expanded_args[i] != NULL; i++) free(expanded_args[i]);
+                    free(expanded_args);
+                    exit(EXIT_FAILURE);
+                }
+                if (dup2(fd, STDOUT_FILENO) == -1) {
+                    perror("dup2");
+                     // Free expanded_args before exiting
+                    for(int i=0; expanded_args[i] != NULL; i++) free(expanded_args[i]);
+                    free(expanded_args);
+                    exit(EXIT_FAILURE);
+                }
+                close(fd);
+            }
+
+            if (execvp(expanded_args[0], expanded_args) == -1) {
+                fprintf(stderr, "command not found: %s\n", expanded_args[0]);
+            }
+
+            // Free the expanded arguments before exiting the child process
+            for(int i=0; expanded_args[i] != NULL; i++) free(expanded_args[i]);
+            free(expanded_args);
+
+            exit(EXIT_FAILURE); // Exit child process
         }
-        exit(EXIT_FAILURE);
     } else {
         // Parent process
         int status;
